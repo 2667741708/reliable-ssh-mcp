@@ -1,0 +1,25 @@
+node_modules/
+.codex_tmp_deps/
+staging/
+artifacts/
+config/fleet.json
+config/fleet.local.json
+config/fleet.v2.pending.json
+config/fleet.json.*
+config/*.server-info.json
+config/*.server-info.json.*
+*.log
+*.tgz
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Keep only the generic smoke clients in source control. Local migration,
+# inventory, and host-bootstrap helpers can contain deployment-specific data.
+scripts/*
+!scripts/smoke-test.js
+!scripts/windows-smoke-test.js
+!scripts/fleet-smoke-test.js

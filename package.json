@@ -1,0 +1,40 @@
+{
+  "name": "reliable-ssh-mcp",
+  "version": "0.8.0",
+  "description": "A structured SSH MCP server that avoids multi-shell quoting errors.",
+  "type": "module",
+  "bin": {
+    "reliable-ssh-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/config.test.js test/client-roots.test.js test/connection-pool.test.js test/identity.test.js test/remote-runner.test.js test/audit.test.js test/local-path.test.js test/policy.test.js test/templates.test.js test/task-manager.test.js test/fleet-config.test.js test/route-check.test.js test/server-registration.test.js test/session-password.test.js test/server-info.test.js test/registry.test.js test/persistent-bootstrap.test.js",
+    "check": "node --check src/index.js && node --check src/server.js && node --check src/fleet-server.js && node --check src/ssh-client.js && node --check src/connection-pool.js && node --check src/remote-command.js && node --check src/remote-runner.js && node --check src/audit.js && node --check src/local-path.js && node --check src/local-roots.js && node --check src/client-roots.js && node --check src/archive-manager.js && node --check src/tunnel-manager.js && node --check src/task-manager.js && node --check src/fleet-config.js && node --check src/route-check.js && node --check src/policy.js && node --check src/templates.js && node --check src/server-info.js && node --check src/registry.js && node --check src/config.js",
+    "smoke": "node scripts/smoke-test.js",
+    "smoke:windows": "node scripts/windows-smoke-test.js",
+    "smoke:fleet": "node scripts/fleet-smoke-test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "3.25.76"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.0",
+    "fast-uri": "3.1.5",
+    "hono": "4.13.1",
+    "ip-address": "10.5.0"
+  },
+  "files": [
+    "config/fleet.example.json",
+    "docs/",
+    "scripts/smoke-test.js",
+    "scripts/windows-smoke-test.js",
+    "scripts/fleet-smoke-test.js",
+    "src/",
+    "test/",
+    "README.md"
+  ]
+}

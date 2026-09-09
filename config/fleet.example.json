@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "defaults": {
+    "mode": "restricted",
+    "toolGroups": [
+      "core",
+      "files",
+      "transfer",
+      "archives",
+      "templates",
+      "connections",
+      "tunnels",
+      "tasks",
+      "discovery",
+      "sessions"
+    ],
+    "poolSize": 2,
+    "connectTimeoutSec": 8,
+    "commandTimeoutSec": 25,
+    "transferTimeoutSec": 30,
+    "maxOutputBytes": 1048576,
+    "localRoots": {
+      "project": "."
+    },
+    "allowScripts": false,
+    "allowScriptHashes": [],
+    "allowPrograms": [
+      "df",
+      "git",
+      "hostname",
+      "ls",
+      "nvidia-smi",
+      "python3",
+      "stat",
+      "systemctl",
+      "uname",
+      "uptime"
+    ],
+    "denyPrograms": [
+      "dd",
+      "mkfs",
+      "poweroff",
+      "reboot",
+      "shutdown"
+    ],
+    "readOnlyPrograms": [
+      "df",
+      "hostname",
+      "ls",
+      "nvidia-smi",
+      "stat",
+      "uname",
+      "uptime"
+    ]
+  },
+  "servers": {
+    "example_bastion": {
+      "sshTarget": "example-bastion",
+      "expectedHostname": "bastion.example",
+      "expectedIp": "192.0.2.2",
+      "auditLog": "./logs/example-bastion.jsonl"
+    },
+    "example_gpu": {
+      "sshTarget": "example-gpu",
+      "proxyJump": "example-bastion",
+      "expectedHostname": "gpu-host.example",
+      "expectedIp": "192.0.2.10",
+      "expectedGpu": "RTX 4090",
+      "auditLog": "./logs/example-gpu.jsonl",
+      "allowTemplates": [
+        "gpu_inventory",
+        "disk_usage",
+        "git_status"
+      ],
+      "serverInfo": {
+        "description": "Example research GPU server; replace with measured inventory",
+        "memoryGb": 64,
+        "storageTb": 4,
+        "gpus": [
+          {
+            "model": "RTX 4090",
+            "count": 1,
+            "memoryGbPerGpu": 48
+          }
+        ],
+        "usageGuidance": "Use the data directory only after verifying the data disk mount.",
+        "source": "Illustrative example, not measured hardware"
+      }
+    }
+  },
+  "bastions": {
+    "example_lan": {
+      "server": "example_bastion",
+      "allowedCidrs": [
+        "192.0.2.0/28"
+      ],
+      "allowedPorts": [
+        22
+      ],
+      "maxHosts": 16,
+      "defaultUser": "research",
+      "onboardDefaults": {
+        "mode": "restricted",
+        "allowPrograms": [
+          "df",
+          "hostname",
+          "nvidia-smi",
+          "python3",
+          "stat",
+          "uname",
+          "uptime"
+        ]
+      }
+    }
+  },
+  "serverGroups": {
+    "gpu_nodes": [
+      "example_gpu"
+    ]
+  },
+  "templates": {
+    "gpu_inventory": {
+      "description": "List GPU model, UUID, driver, memory, temperature, and utilization.",
+      "program": "nvidia-smi",
+      "args": [
+        "--query-gpu=name,uuid,driver_version,memory.total,memory.used,temperature.gpu,utilization.gpu",
+        "--format=csv,noheader"
+      ]
+    },
+    "disk_usage": {
+      "description": "Show filesystem usage for one path.",
+      "program": "df",
+      "args": [
+        "-h",
+        "--",
+        "{{path}}"
+      ],
+      "parameters": [
+        "path"
+      ]
+    },
+    "git_status": {
+      "description": "Show concise Git status in a configured repository path.",
+      "program": "git",
+      "args": [
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "{{repository}}",
+      "parameters": [
+        "repository"
+      ]
+    }
+  }
+}
