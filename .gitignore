@@ -2,6 +2,7 @@ node_modules/
 .codex_tmp_deps/
 staging/
 artifacts/
+health-canary*/
 config/fleet.json
 config/fleet.local.json
 config/fleet.v2.pending.json
@@ -23,3 +24,5 @@ scripts/*
 !scripts/smoke-test.js
 !scripts/windows-smoke-test.js
 !scripts/fleet-smoke-test.js
+!scripts/code-inspect.mjs
+!scripts/project-verify.mjs

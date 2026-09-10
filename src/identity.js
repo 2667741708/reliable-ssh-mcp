@@ -1,3 +1,13 @@
+export function identityCacheValid(entry, client, ttlMs = 300000) {
+  if (!entry || Date.now() - entry.verifiedAt >= ttlMs) return false;
+  return typeof client.isFresh !== "function" ||
+    (entry.generation === client.generation && client.isFresh());
+}
+
+export function identityCacheEntry(identity, client) {
+  return { identity, verifiedAt: Date.now(), generation: client.generation };
+}
+
 export function verifyIdentity(identity, expected) {
   const problems = [];
 

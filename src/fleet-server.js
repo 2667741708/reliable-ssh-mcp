@@ -13,7 +13,7 @@ import { ArchiveManager } from "./archive-manager.js";
 import { createAuditLogger } from "./audit.js";
 import { effectiveLocalRoots } from "./client-roots.js";
 import { ConnectionPool } from "./connection-pool.js";
-import { verifyIdentity } from "./identity.js";
+import { verifyIdentity, identityCacheValid, identityCacheEntry } from "./identity.js";
 import {
   commitDownloadedFile,
   discardTemporaryPath,
@@ -253,13 +253,14 @@ export function createFleetServer(fleet, scope = {}) {
       await verifyConfiguredRoute(selected);
       verifiedRoutes.add(selected.name);
     }
-    if (!force && identities.has(selected.name))
-      return identities.get(selected.name);
+    const client = getPool(selected);
+    const cached = identities.get(selected.name);
+    if (!force && identityCacheValid(cached, client)) return cached.identity;
     const identity = await getPool(selected).invoke({
       operation: "probe_identity",
     });
     const verified = verifyIdentity(identity, selected);
-    identities.set(selected.name, verified);
+    identities.set(selected.name, identityCacheEntry(verified, client));
     return verified;
   }
 
@@ -1353,6 +1354,9 @@ export function createFleetServer(fleet, scope = {}) {
     { server: serverSchema },
     mutatingAnnotations,
     wrap("close_connections", "connections", async (_args, selected) => {
+      if (getPool(selected).status().sessions.some(s => s.in_flight > 0)) {
+        throw new Error("Refusing to close connections with in-flight requests");
+      }
       getPool(selected).close();
       identities.delete(selected.name);
       return resultContent({ server: selected.name, closed: true });

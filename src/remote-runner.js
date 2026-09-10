@@ -327,6 +327,11 @@ def probe_identity():
         "gpus": gpus,
     }
 
+
+def ping():
+    # Liveness only: no subprocess, DNS lookup or GPU enumeration.
+    return {"pong": True, "pid": os.getpid()}
+
 def resolve_path(raw_path):
     return pathlib.Path(raw_path).expanduser()
 
@@ -521,7 +526,7 @@ def start_tmux_session(payload):
         + exact_command
         + " 2>&1 | tee -a "
         + shlex.quote(str(log_path))
-        + "; rc=\${PIPESTATUS[0]}; printf '%s\\n' \"$rc\" > "
+        + "; rc=$" + "{PIPESTATUS[0]}; printf '%s\\n' \"$rc\" > "
         + shlex.quote(str(status_path))
         + "; exit \"$rc\""
     )
@@ -717,6 +722,8 @@ try:
         result = run_script(PAYLOAD)
     elif operation == "probe_identity":
         result = probe_identity()
+    elif operation == "ping":
+        result = ping()
     elif operation == "stat_path":
         result = stat_path(PAYLOAD)
     elif operation == "read_file":
@@ -796,6 +803,8 @@ for request_line in sys.stdin:
             result = run_script(PAYLOAD)
         elif operation == "probe_identity":
             result = probe_identity()
+        elif operation == "ping":
+            result = ping()
         elif operation == "stat_path":
             result = stat_path(PAYLOAD)
         elif operation == "read_file":

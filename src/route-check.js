@@ -55,13 +55,13 @@ export function verifyConfiguredRoute(config) {
       clearTimeout(timer);
       reject(new Error(`Could not inspect the local SSH route: ${error.message}`));
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (code !== 0) {
         const details = Buffer.concat(stderr).toString("utf8").trim();
         reject(
           new Error(
-            `Could not inspect the local SSH route for ${config.sshTarget}${details ? `: ${details}` : ""}`,
+            `[SSH_LOCAL_ROUTE_ERROR] Could not inspect the local SSH route for ${config.sshTarget} (exit=${code}, signal=${signal ?? "none"})${details ? `: ${details}` : ""}`,
           ),
         );
         return;

@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { createAuditLogger } from "./audit.js";
 import { effectiveLocalRoots } from "./client-roots.js";
-import { verifyIdentity } from "./identity.js";
+import { verifyIdentity, identityCacheValid, identityCacheEntry } from "./identity.js";
 import {
   commitDownloadedFile,
   discardTemporaryPath,
@@ -213,10 +213,10 @@ export function createReliableSshServer(
       await verifyConfiguredRoute(config);
       verifiedRoute = true;
     }
-    if (!force && verifiedIdentity) return verifiedIdentity;
+    if (!force && identityCacheValid(verifiedIdentity, operationClient)) return verifiedIdentity.identity;
     const identity = await operationClient.invoke({ operation: "probe_identity" });
-    verifiedIdentity = verifyIdentity(identity, config);
-    return verifiedIdentity;
+    verifiedIdentity = identityCacheEntry(verifyIdentity(identity, config), operationClient);
+    return verifiedIdentity.identity;
   }
 
   async function runVerified(payload) {

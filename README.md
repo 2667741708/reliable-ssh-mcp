@@ -6,7 +6,7 @@ for interpreter selection, supported reload fields and the initial restart requi
 
 `reliable-ssh-mcp` is a local STDIO MCP server for running structured commands and fleet operations on Linux/OpenSSH and Windows/OpenSSH or pinned-key Windows/Plink hosts. It avoids sending user-controlled command data through unnecessary shell quoting layers.
 
-Version `0.8.0` supports fixed single-server instances and a unified fleet instance, including named local roots, controlled bastion discovery, fingerprint-pinned ephemeral onboarding, durable tmux-backed experiment sessions, and target-aware text line endings.
+Version `0.9.0` adds a health-aware connection pool, bounded read-only probe recovery, parser-safe local code inspection and a fixed release-verification pipeline. It also supports fixed single-server instances and a unified fleet instance, including named local roots, controlled bastion discovery, fingerprint-pinned ephemeral onboarding, durable tmux-backed experiment sessions, and target-aware text line endings. See the [changelog](CHANGELOG.md).
 
 Architecture decisions are documented in [docs/adr](docs/adr/0001-fleet-composition-and-structured-execution.md).
 
@@ -211,16 +211,37 @@ Single-server instances can also reuse authenticated connections:
 node .\src\index.js --ssh-target server --pool-size 1 --keepalive-interval 30 --heartbeat-interval 60
 ```
 
-OpenSSH receives protocol keepalive options. Plink/Windows uses the same long-running remote Python runner plus a separately configured idle read-only `probe_identity` heartbeat. A 30-second protocol keepalive and 60-second application heartbeat are conservative starting values; a closed session is rebuilt before a later request, and an in-flight command is never automatically replayed.
+OpenSSH receives protocol keepalive options. The persistent Python runner uses a separately configured idle `ping` heartbeat, without launching hostname or GPU subprocesses. Busy sessions skip application heartbeats. A 30-second protocol keepalive and 60-second application heartbeat are conservative starting values.
+
+One verified connection is sufficient to serve a request; spare connections are filled in the background. Idle connections without a successful response for 60 seconds are pinged before use. Identity cache entries expire after five minutes and are invalidated when pool generation changes or no recently responsive connection remains. Every new connection verifies the configured identity before serving user operations.
+
+Only built-in `probe_identity` and `ping` operations may retry once after a transport failure. User commands, file writes, and training launches are never automatically replayed; identity mismatch and explicit controller closure stop retries. No route is switched automatically. Connection status reports response freshness, classified errors, heartbeat counts, and `implementation: health-pool-v2`.
+
+Source and transport-configuration changes require restarting/reconnecting the MCP server process. `reload_config` reloads execution policy only; closing SSH connections does not load new JavaScript or transport settings. Do not force-restart a shared MCP process with in-flight operations.
 
 ## Run the checks
 
-From this directory, run:
+Run the complete fixed verification pipeline before committing or publishing:
+
+```powershell
+npm run verify
+```
+
+For an individual check, run:
 
 ```powershell
 npm test
 npm run check
 ```
+
+For parser-safe numbered source inspection:
+
+```powershell
+npm run inspect -- lines --file src/connection-pool.js --start 279 --end 340
+```
+
+Complex regular expressions belong in a project-relative JSON query file, not
+in a PowerShell command. See the [code-inspection guide](docs/code-inspection.md).
 
 Run an end-to-end check against one configured SSH alias:
 
