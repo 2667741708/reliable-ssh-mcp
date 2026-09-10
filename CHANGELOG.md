@@ -1,5 +1,7 @@
 # Changelog
 
+English | [简体中文](CHANGELOG.zh-CN.md)
+
 ## 0.9.0 - 2026-09-10
 
 ### Added
@@ -27,3 +29,9 @@
 - Closing the controller cancels delayed retries and in-progress pool refills.
 - Complex regular expressions are read from JSON files instead of being passed
   through PowerShell quoting layers.
+
+### Documentation
+
+- Added a complete Simplified Chinese README and Chinese changelog.
+- Added an explicit first-time reading order and clarified the different roles
+  of README usage documentation and version history.

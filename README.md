@@ -1,5 +1,7 @@
 # reliable-ssh-mcp
 
+English | [简体中文](README.zh-CN.md)
+
 Execution policy can now be inspected with `get_execution_policy` and reloaded
 from disk with `reload_config`. See [exploration and training](docs/autonomous-training.md)
 for interpreter selection, supported reload fields and the initial restart requirement.
@@ -9,6 +11,29 @@ for interpreter selection, supported reload fields and the initial restart requi
 Version `0.9.0` adds a health-aware connection pool, bounded read-only probe recovery, parser-safe local code inspection and a fixed release-verification pipeline. It also supports fixed single-server instances and a unified fleet instance, including named local roots, controlled bastion discovery, fingerprint-pinned ephemeral onboarding, durable tmux-backed experiment sessions, and target-aware text line endings. See the [changelog](CHANGELOG.md).
 
 Architecture decisions are documented in [docs/adr](docs/adr/0001-fleet-composition-and-structured-execution.md).
+
+## Recommended reading order
+
+This README keeps capability documentation grouped by topic so experienced
+users can find a reference quickly. First-time users should read it in this
+order instead of following the file strictly from top to bottom:
+
+1. Read the introduction and **Use structured tools instead of shell strings**
+   to understand the safety model.
+2. Read **Start the server** and begin with one SSH alias.
+3. Read **Client roots and publication safety** before uploading or downloading.
+4. Read **Cross-platform scripts and line endings** before sending scripts.
+5. Read **Run long experiments in managed tmux sessions** for durable jobs.
+6. Read **Use the fleet server for multi-host operations**, then the bastion and
+   unified-registry sections only when managing multiple machines.
+7. Read password, inventory and Windows-persistence sections only when those
+   deployment modes apply.
+8. Contributors should finish with **Run the checks**, the
+   [parser-safe inspection guide](docs/code-inspection.md), and the
+   [changelog](CHANGELOG.md).
+
+Version history is maintained in [CHANGELOG.md](CHANGELOG.md); the Chinese
+version is [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md).
 
 ## Use structured tools instead of shell strings
 

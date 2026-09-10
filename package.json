@@ -42,6 +42,8 @@
     "test/",
     "AGENTS.md",
     "CHANGELOG.md",
-    "README.md"
+    "CHANGELOG.zh-CN.md",
+    "README.md",
+    "README.zh-CN.md"
   ]
 }
