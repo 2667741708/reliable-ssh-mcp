@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { parseConfig } from "../src/config.js";
 import { loadFleetConfig } from "../src/fleet-config.js";
@@ -60,6 +62,44 @@ test("fleet surface registers bastion discovery, onboarding, and session tools",
       assert.ok(names.includes(name), `Missing fleet tool ${name}`);
     }
   } finally {
+    runtime.close();
+  }
+});
+
+test("fixed readonly fleet exposes execution with readonly annotations and output schemas", async () => {
+  const examplePath = fileURLToPath(
+    new URL("../config/fleet.example.json", import.meta.url),
+  );
+  const fleet = await loadFleetConfig(examplePath);
+  fleet.servers.example_gpu.mode = "readonly";
+  fleet.servers.example_gpu.readOnlyPrograms = ["hostname", "nvidia-smi", "find"];
+  fleet.servers.example_gpu.auditLog = undefined;
+  const runtime = createFleetServer(fleet, { server: "example_gpu" });
+  const client = new Client({ name: "registration-test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await runtime.server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const listed = await client.listTools();
+    for (const name of ["exec_argv", "run_template"]) {
+      const tool = listed.tools.find((candidate) => candidate.name === name);
+      assert.ok(tool, `Missing fixed readonly tool ${name}`);
+      assert.equal(tool.annotations.readOnlyHint, true);
+      assert.equal(tool.annotations.destructiveHint, false);
+      assert.equal(tool.outputSchema.type, "object");
+    }
+    const denied = await client.callTool({
+      name: "exec_argv",
+      arguments: { program: "find", args: ["/tmp", "-delete"] },
+    });
+    assert.equal(denied.isError, true);
+    const deniedText = JSON.parse(denied.content[0].text);
+    assert.equal(deniedText.code, "READONLY_PROFILE_UNAVAILABLE");
+    assert.equal(denied.structuredContent.code, deniedText.code);
+    assert.equal(denied.structuredContent.suggested_tool, undefined);
+    assert.equal(denied.structuredContent.next_step, deniedText.next_step);
+  } finally {
+    await client.close();
     runtime.close();
   }
 });

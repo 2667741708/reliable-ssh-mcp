@@ -151,7 +151,8 @@ test("independent entry is pinned, hides fleet discovery and other-host inventor
   const runtime=createFleetServer(fleet,{server:"gpu",route:"ssh"});
   await withClient(runtime,async client=>{
    assert.ok(!client.getInstructions().includes("OTHER_PRIVATE_INVENTORY"));
-   assert.ok(client.getInstructions().includes("Verify the data mount"));
+   assert.ok(!client.getInstructions().includes("Verify the data mount"));
+   assert.match(client.getInstructions(),/get_server_info/u);
    const tools=await client.listTools();
    assert.ok(!tools.tools.some(x=>x.name==="list_servers"||x.name==="onboard_discovered_host"));
    for(const tool of tools.tools) {
@@ -160,6 +161,7 @@ test("independent entry is pinned, hides fleet discovery and other-host inventor
    }
    const {value}=await invoke(client,"get_server_info");
    assert.equal(value.name,"gpu");assert.equal(value.route,"ssh");
+   assert.equal(value.server_info.usageGuidance,"Verify the data mount before writing.");
    // Unknown keys may be stripped by SDK validation, but cannot change the target.
    const override=await invoke(client,"get_server_info",{server:"other",route:"plink"});
    assert.ok(override.result.isError || override.value.connection_id==="gpu@ssh");

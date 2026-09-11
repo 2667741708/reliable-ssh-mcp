@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
+import { evaluateReadOnlyCommand } from "./readonly-policy.js";
+
 const MUTATING_TOOLS = new Set([
   "exec_argv",
   "run_bash_script",
@@ -26,13 +28,23 @@ function normalizedProgram(program) {
     .toLowerCase();
 }
 
+function readOnlyProgramDeclared(programs, program) {
+  const requested = String(program ?? "");
+  const hasPath = /[\\/]/u.test(requested);
+  return programs.some((declared) => {
+    if (hasPath) return declared === requested;
+    return !/[\\/]/u.test(declared) &&
+      normalizedProgram(declared) === normalizedProgram(requested);
+  });
+}
+
 export function evaluatePolicy(server, tool, args = {}) {
   if (server.mode === "readonly" && MUTATING_TOOLS.has(tool)) {
     if (
       tool === "exec_argv" &&
-      server.readOnlyPrograms.includes(normalizedProgram(args.program))
+      readOnlyProgramDeclared(server.readOnlyPrograms, args.program)
     ) {
-      return { allowed: true };
+      return evaluateReadOnlyCommand(args);
     }
     return {
       allowed: false,

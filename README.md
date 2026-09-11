@@ -8,7 +8,10 @@ for interpreter selection, supported reload fields and the initial restart requi
 
 `reliable-ssh-mcp` is a local STDIO MCP server for running structured commands and fleet operations on Linux/OpenSSH and Windows/OpenSSH or pinned-key Windows/Plink hosts. It avoids sending user-controlled command data through unnecessary shell quoting layers.
 
-Version `0.9.0` adds a health-aware connection pool, bounded read-only probe recovery, parser-safe local code inspection and a fixed release-verification pipeline. It also supports fixed single-server instances and a unified fleet instance, including named local roots, controlled bastion discovery, fingerprint-pinned ephemeral onboarding, durable tmux-backed experiment sessions, and target-aware text line endings. See the [changelog](CHANGELOG.md).
+Version `0.9.1` hardens read-only command profiles, adds structured MCP outputs,
+keeps runtime versions aligned with the package, and fixes CLI help and audit
+decisions. It builds on the health-aware connection pool and cross-platform
+features introduced in 0.9.0. See the [changelog](CHANGELOG.md).
 
 Architecture decisions are documented in [docs/adr](docs/adr/0001-fleet-composition-and-structured-execution.md).
 
@@ -79,6 +82,42 @@ object such as
 `{"project":".","shared":"${RELIABLE_SSH_SHARED_ROOT}"}`.
 
 Each execution result separates `stdout`, `stderr`, `exit_code`, `timed_out`, `duration_ms`, and truncation metadata. Text written to stderr does not make a successful process fail when its exit code is zero.
+Tools return both human-readable JSON text and an equivalent
+`structuredContent.data` object. Errors use `structuredContent.error`, with a
+stable policy code and a non-executable `next_step` explanation when available.
+
+## Security model and read-only policy
+
+MCP annotations are hints for clients; server-side policy remains authoritative.
+In Fleet `readonly` mode, listing a name in `readOnlyPrograms` is necessary but
+not sufficient. The executable must also have a built-in positive argv profile,
+and every supplied argument must match that profile. Programs without a profile
+fail with `READONLY_PROFILE_UNAVAILABLE`; unsupported arguments fail with
+`READONLY_PROFILE_DENIED`. Neither triggers a request to bypass policy. Complex
+tools such as `find`, `sed`,
+`journalctl`, and `ip` are not supported in `readonly` mode. Supporting one
+requires a dedicated read-only profile or tool that has been code-reviewed and
+tested. A reviewed template may be used under `restricted` policy, but templates
+never bypass the read-only argv profile.
+
+For a read-only Git status, the safety flags are global arguments and therefore
+must appear before the subcommand:
+
+```text
+git --no-pager --no-optional-locks status --short --branch
+```
+
+The policy allowlist reduces mistakes but is not an operating-system sandbox.
+Use a least-privilege SSH account, remote filesystem permissions, containers or
+service-level isolation where untrusted prompts or models are in scope.
+
+The service does not automatically:
+
+- turn user approval into a bypass for local-root, credential, or host identity checks;
+- replay ordinary commands, writes, uploads, or training launches after failure;
+- switch to another route when a configured route fails;
+- read local files outside effective named roots;
+- accept unknown SSH host keys or scan undeclared networks.
 
 ## Cross-platform scripts and line endings
 
@@ -276,6 +315,14 @@ npm run smoke -- --ssh-target example-gpu --expected-hostname gpu-host.example -
 
 The smoke test verifies the MCP handshake, tool list, host identity, special-character argv handling, stderr handling, Bash stdin execution, atomic file writing, file reading, stat metadata, and cleanup.
 
+For a production host where no remote mutation is acceptable, run the dedicated
+read-only smoke test. It checks schemas, identity, path metadata, and an optional
+profiled command without attempting any remote write or delete tool:
+
+```powershell
+npm run smoke:readonly -- --fleet-config .\config\fleet.json --server readonly_host
+```
+
 ## Start the server
 
 ```powershell
@@ -394,10 +441,11 @@ measurements, disk layout and unit caveats in `notes`.
 `get_server_info({server: "name"})` returns one fleet host's saved inventory;
 a single-server instance uses `get_server_info({})`. Neither requires an SSH
 connection. Missing inventory is `null`; credentials are never included.
-Single-server MCP startup instructions contain its inventory; both modes include
-operator-configured `usageGuidance` in startup instructions so agents see storage
-preferences even before invoking a tool. This guidance does not change execution
-policy, grant permissions or enforce filesystem restrictions.
+Startup instructions intentionally do not embed per-server inventory or
+`usageGuidance`. After selecting a host, call `get_server_info` to load those
+details on demand. This keeps tool discovery compact and prevents one server's
+guidance from being repeated across unrelated contexts. Guidance does not change
+execution policy, grant permissions or enforce filesystem restrictions.
 
 Files are loaded at startup. Restart/reconnect the affected MCP instances after
 editing code or inventory. Hardware metadata is a dated snapshot; use remote

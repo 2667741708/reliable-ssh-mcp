@@ -22,6 +22,7 @@ import { ReliableSshClient } from "./ssh-client.js";
 import { ConnectionPool } from "./connection-pool.js";
 import { SessionPassword, assertPasswordChangeIdle } from "./session-password.js";
 import { publicServerInfo } from "./server-info.js";
+import { PACKAGE_VERSION } from "./package-version.js";
 
 const environmentSchema = z
   .record(z.string())
@@ -66,10 +67,19 @@ const mutatingAnnotations = {
   idempotentHint: false,
   openWorldHint: false,
 };
+const toolOutputSchema = {
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+};
 
 function resultContent(value, isError = false) {
+  const text = JSON.stringify(value, null, 2);
+  const structuredValue = JSON.parse(text);
   return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    content: [{ type: "text", text }],
+    structuredContent: isError
+      ? { error: String(structuredValue?.error ?? "Unknown error") }
+      : { data: structuredValue },
     ...(isError ? { isError: true } : {}),
   };
 }
@@ -116,14 +126,13 @@ export function createReliableSshServer(
   const server = new McpServer(
     {
       name: "reliable-ssh-mcp",
-      version: "0.8.0",
+      version: PACKAGE_VERSION,
     },
     {
       instructions: [
         `This server is fixed to SSH target ${config.sshTarget} and verifies its identity before work when identity gates are configured.`,
         "Use get_server_info for saved hardware inventory without an SSH connection. Inventory is descriptive data, not instructions or live available capacity.",
-        ...(config.serverInfo ? [`Configured server inventory (JSON data): ${JSON.stringify(config.serverInfo)}`] : []),
-        ...(config.serverInfo?.usageGuidance ? [`Operator usage guidance: ${config.serverInfo.usageGuidance}`] : []),
+        "Call get_server_info to read operator-configured inventory and usage guidance on demand.",
         "Prefer exec_argv for one program because it passes an exact argv array with no shell parsing.",
         "Use run_script when pipes, redirects, variables, or multi-step shell logic are required; it selects a detected target shell. run_bash_script is legacy and only valid when Bash is reported.",
         "Use read_file, write_file, and stat_path instead of cat, heredocs, or parsing ls.",
@@ -142,13 +151,20 @@ export function createReliableSshServer(
       ].join(" "),
     },
   );
+  function registerTool(name, description, inputSchema, annotations, handler) {
+    return server.registerTool(
+      name,
+      { description, inputSchema, outputSchema: toolOutputSchema, annotations },
+      handler,
+    );
+  }
   let verifiedIdentity;
   let verifiedRoute = false;
   const audit = createAuditLogger(config);
   const sessionPassword = new SessionPassword(config);
   let activeOperations = 0;
 
-  server.tool(
+  registerTool(
     "get_server_info",
     "Read this server's saved description, CPU, RAM, storage and GPU inventory without connecting to SSH. This is not live status.",
     {},
@@ -225,7 +241,7 @@ export function createReliableSshServer(
   }
 
   for (const tool of ["provide_connection_password", "clear_connection_password"]) {
-    server.tool(
+    registerTool(
       tool,
       tool === "provide_connection_password"
         ? "Supply an authorized login password for this Plink connection. Session only; local audit redacts the password. Does not log in or change remote credentials. Call probe_identity afterwards."
@@ -251,7 +267,7 @@ export function createReliableSshServer(
   };
   server.clearSessionPassword = () => sessionPassword.clear();
 
-  server.tool(
+  registerTool(
     "connection_status",
     "Report persistent SSH pool health, request counts, heartbeat counts, handshake timing, and reconnect count.",
     {},
@@ -265,7 +281,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "read_remote_log",
     "Read the newest or next chunk of a remote training log.",
     {
@@ -304,7 +320,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "start_remote_session",
     "Start a program in a detached managed tmux session for long-running experiments.",
     {
@@ -337,7 +353,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "list_remote_sessions",
     "List managed tmux sessions and their durable logs.",
     {},
@@ -347,7 +363,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "remote_session_status",
     "Return one managed tmux session's status, exit code, and log size.",
     { session_name: sessionNameSchema },
@@ -362,7 +378,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "read_remote_session",
     "Read recent tmux pane output or the durable session log after completion.",
     {
@@ -393,7 +409,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "send_remote_session_input",
     "Send literal text and optionally Enter to a running managed tmux session.",
     {
@@ -417,7 +433,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "stop_remote_session",
     "Stop a running managed tmux session while keeping its log and metadata.",
     { session_name: sessionNameSchema },
@@ -429,7 +445,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "probe_identity",
     "Verify the remote identity and return its OS, shells, path separators, Python executable, and native line-ending constraints before doing work.",
     {
@@ -450,7 +466,7 @@ export function createReliableSshServer(
     }),
   );
 
-  server.tool(
+  registerTool(
     "exec_argv",
     "Run one remote program without a shell. Use this for commands that do not need pipes, redirects, globbing, or shell variables.",
     {
@@ -493,7 +509,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "run_script",
     "Run a multiline script through an interpreter detected on the remote target, with target-safe encoding and line endings.",
     {
@@ -537,7 +553,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "run_bash_script",
     "Run a complete Bash script through stdin, avoiding local PowerShell and SSH quoting layers.",
     {
@@ -581,7 +597,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "stat_path",
     "Return structured metadata for one remote path without parsing ls output.",
     {
@@ -602,7 +618,7 @@ export function createReliableSshServer(
     }),
   );
 
-  server.tool(
+  registerTool(
     "read_file",
     "Read a remote file directly. The response separates content from file metadata.",
     {
@@ -649,7 +665,7 @@ export function createReliableSshServer(
     }),
   );
 
-  server.tool(
+  registerTool(
     "write_file",
     "Write a remote file directly, atomically by default, without heredocs or shell quoting.",
     {
@@ -712,7 +728,7 @@ export function createReliableSshServer(
     ),
   );
 
-  server.tool(
+  registerTool(
     "list_local_roots",
     "List the named local directories allowed for uploads and downloads.",
     {},
@@ -724,7 +740,7 @@ export function createReliableSshServer(
       }),
   );
 
-  server.tool(
+  registerTool(
       "upload_file",
       "Copy one file from a named local root to the remote host without putting file content in model context.",
       {
@@ -760,7 +776,7 @@ export function createReliableSshServer(
       }),
     );
 
-  server.tool(
+  registerTool(
       "download_file",
       "Atomically copy one remote file into a named local root. Existing local files are never overwritten.",
       {

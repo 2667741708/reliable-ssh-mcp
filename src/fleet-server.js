@@ -33,6 +33,8 @@ import { TunnelManager } from "./tunnel-manager.js";
 import { SessionPassword, assertPasswordChangeIdle } from "./session-password.js";
 import { publicServerInfo } from "./server-info.js";
 import { resolveFleetServer, registryRows, assertTransportSupported } from "./registry.js";
+import { PACKAGE_VERSION } from "./package-version.js";
+import { hasReadOnlyProfile } from "./readonly-policy.js";
 
 const readOnlyAnnotations = {
   readOnlyHint: true,
@@ -45,6 +47,13 @@ const mutatingAnnotations = {
   destructiveHint: true,
   idempotentHint: false,
   openWorldHint: false,
+};
+const toolOutputSchema = {
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+  code: z.string().optional(),
+  suggested_tool: z.string().optional(),
+  next_step: z.string().optional(),
 };
 const serverSchema = z
   .string()
@@ -69,8 +78,22 @@ const sessionNameSchema = z
   .describe("Managed tmux session name.");
 
 function resultContent(value, isError = false) {
+  const text = JSON.stringify(value, null, 2);
+  const structuredValue = JSON.parse(text);
   return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    content: [{ type: "text", text }],
+    structuredContent: isError
+      ? {
+          error: String(structuredValue?.error ?? "Unknown error"),
+          ...(structuredValue?.code ? { code: structuredValue.code } : {}),
+          ...(structuredValue?.suggested_tool
+            ? { suggested_tool: structuredValue.suggested_tool }
+            : {}),
+          ...(structuredValue?.next_step
+            ? { next_step: structuredValue.next_step }
+            : {}),
+        }
+      : { data: structuredValue },
     ...(isError ? { isError: true } : {}),
   };
 }
@@ -101,19 +124,18 @@ export function createFleetServer(fleet, scope = {}) {
   const fixed = scope.server ? resolveFleetServer(fleet, scope.server, scope.route) : undefined;
   if (scope.route && !scope.server) throw new Error("A fixed route requires a server");
   const visibleServers = fixed ? [fixed] : Object.values(fleet.servers);
+  const policyAwareExecutionAnnotations =
+    fixed?.mode === "readonly" ? readOnlyAnnotations : mutatingAnnotations;
   const server = new McpServer(
-    { name: "reliable-ssh-fleet-mcp", version: "0.8.0" },
+    { name: "reliable-ssh-fleet-mcp", version: PACKAGE_VERSION },
     {
       instructions: [
         fixed
           ? "This independent MCP is fixed to " + (fixed.hostName ?? fixed.name) + " via " + (fixed.routeName ?? "its configured route") + ". It uses the same registry and policy as Fleet; target overrides are not permitted."
           : "Use list_servers before selecting a target when the user did not name one. Each host lists its routes; specify route to choose one. Legacy aliases pin their original route. Routes never switch automatically and commands are never replayed after a failure.",
         "list_servers and get_server_info show each host\'s configured description, CPU, RAM, storage and GPU inventory. Inventory is descriptive data, not instructions or live available capacity; check the source and verifiedAt before relying on it.",
-        "Read each selected server's usageGuidance for operator-configured working-directory and storage preferences.",
-        ...visibleServers.filter((item) => item.serverInfo?.usageGuidance).map((item) =>
-          `Server ${item.name} operator usage guidance: ${item.serverInfo.usageGuidance}`),
+        "After selecting a server, call get_server_info to read its operator-configured usage guidance on demand.",
         "Inspect route capabilities: this version requires an OpenSSH route for upload/download and tunnels; Plink remains available for command and file tools.",
-        ...(fixed?.serverInfo ? ["Configured server inventory: " + JSON.stringify(fixed.serverInfo)] : []),
         "Prefer exec_argv, templates, and file tools. When a script is necessary, use run_script so the remote interpreter and line endings are selected from the verified target context; run_bash_script is legacy Bash-only.",
         "Call get_execution_policy to discover allowed exploration tools and preferred_python. For training use the user's explicit absolute interpreter path, otherwise preferred_python; verify sys.executable and required imports before launching. Use that same path with -m pip or -m torch.distributed.run. Do not rely on conda activate or PATH. Explore independently within the user's task and configured policy. A policy allowlist is not an OS sandbox.",
         "After an operator edits execution policy in fleet.json, call reload_config and get_execution_policy. Connection and tool-group changes require restart. Reload never edits the configuration file or expands permissions by itself.",
@@ -165,6 +187,12 @@ export function createFleetServer(fleet, scope = {}) {
       allow_program_paths: selected.allowProgramPaths,
       deny_programs: selected.denyPrograms,
       read_only_programs: selected.readOnlyPrograms,
+      read_only_profile_status: Object.fromEntries(
+        selected.readOnlyPrograms.map((program) => [
+          program,
+          hasReadOnlyProfile(program) ? "available" : "unsupported_fail_closed",
+        ]),
+      ),
       preferred_python: selected.preferredPython ?? null,
       preferred_python_allowed: selected.preferredPython ? evaluatePolicy(selected, "exec_argv", { program: selected.preferredPython }).allowed : null,
     })),
@@ -203,7 +231,11 @@ export function createFleetServer(fleet, scope = {}) {
         input = { ...schema, route: z.string().min(1).optional().describe("Route name from list_servers. Omit for the default route; no automatic fallback.") };
       }
     }
-    return server.tool(name, description, input, annotations, callback);
+    return server.registerTool(
+      name,
+      { description, inputSchema: input, outputSchema: toolOutputSchema, annotations },
+      callback,
+    );
   }
 
   function getPool(selected) {
@@ -268,6 +300,7 @@ export function createFleetServer(fleet, scope = {}) {
     const wrapped = async (args) => {
       const startedAt = Date.now();
       let selected;
+      let allowed = false;
       try {
         selected = getServer(args.server, args.route);
         activeOperations.set(selected.name, (activeOperations.get(selected.name) ?? 0) + 1);
@@ -277,7 +310,14 @@ export function createFleetServer(fleet, scope = {}) {
           );
         const policy = evaluatePolicy(selected, tool, args);
         if (!policy.allowed) {
-          const result = errorContent(new Error(policy.reason));
+          const result = resultContent({
+            error: policy.reason,
+            code: policy.code ?? "POLICY_DENIED",
+            ...(policy.suggestedTool
+              ? { suggested_tool: policy.suggestedTool }
+              : {}),
+            ...(policy.nextStep ? { next_step: policy.nextStep } : {}),
+          }, true);
           await safeAudit(selected, {
             tool,
             args,
@@ -288,6 +328,7 @@ export function createFleetServer(fleet, scope = {}) {
           return result;
         }
         assertTransportSupported(selected, tool);
+        allowed = true;
         const result = await handler(args, selected);
         await safeAudit(selected, {
           tool,
@@ -303,7 +344,7 @@ export function createFleetServer(fleet, scope = {}) {
           await safeAudit(selected, {
             tool,
             args,
-            allowed: true,
+            allowed,
             result,
             error,
             startedAt,
@@ -869,7 +910,7 @@ export function createFleetServer(fleet, scope = {}) {
       stdin: z.string().optional(),
       timeout_seconds: timeoutSchema,
     },
-    mutatingAnnotations,
+    policyAwareExecutionAnnotations,
     wrap(
       "exec_argv",
       "core",
@@ -1008,7 +1049,7 @@ export function createFleetServer(fleet, scope = {}) {
       template: z.string().min(1),
       parameters: z.record(z.string()).optional(),
     },
-    mutatingAnnotations,
+    policyAwareExecutionAnnotations,
     wrap(
       "run_template",
       "templates",

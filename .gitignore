@@ -22,6 +22,7 @@ secrets/
 # inventory, and host-bootstrap helpers can contain deployment-specific data.
 scripts/*
 !scripts/smoke-test.js
+!scripts/readonly-smoke-test.js
 !scripts/windows-smoke-test.js
 !scripts/fleet-smoke-test.js
 !scripts/code-inspect.mjs

@@ -14,7 +14,8 @@ Windows/OpenSSH，以及使用固定主机密钥的 Windows/Plink 主机。
 - 下载文件时写入错误项目目录或覆盖已有文件；
 - 长时间训练依赖当前 SSH 窗口，断线后任务一起结束。
 
-当前版本是 `0.9.0`。版本变化请查看：
+当前版本是 `0.9.1`。本版本强化只读命令参数策略、增加结构化 MCP 输出、
+统一运行时与软件包版本，并修复帮助命令和审计判定。版本变化请查看：
 
 - [中文版更新日志](CHANGELOG.zh-CN.md)
 - [英文更新日志](CHANGELOG.md)
@@ -100,6 +101,38 @@ node .\src\index.js `
 能使用 `exec_argv` 时，不要把程序和参数拼成一个 shell 字符串。例如把
 程序写入 `program`，每个参数分别放入 `args`，可以避免空格、中文、引号、
 括号和特殊字符被错误解释。
+
+工具同时返回供人阅读的 JSON 文本和等价的 `structuredContent.data`。
+错误结果使用 `structuredContent.error`；策略拒绝还会尽量返回稳定错误码和
+非执行型的 `next_step` 说明，便于客户端调整方案而不是反复请求用户批准。
+
+## 安全模型与只读策略
+
+MCP 的只读、破坏性等注解只用于帮助客户端判断，服务器端策略才是最终边界。
+在 Fleet 的 `readonly` 模式下，把程序名写进 `readOnlyPrograms` 只是第一步；
+该程序还必须具有内置的正向参数 profile，并且每个参数都符合 profile。
+没有 profile 的程序返回 `READONLY_PROFILE_UNAVAILABLE`，不支持的参数返回
+`READONLY_PROFILE_DENIED`；两者都会直接拒绝，不会要求用户批准绕过。
+`find`、`sed`、`journalctl`、`ip` 等复杂程序在 `readonly` 模式下
+不受支持；只有新增经过代码审查和测试的专用只读 profile 或工具后才能开放。
+经过审查的模板可以在 `restricted` 策略下使用，但模板不能绕过只读 argv profile。
+
+只读 Git 状态必须把全局保护参数放在子命令之前：
+
+```text
+git --no-pager --no-optional-locks status --short --branch
+```
+
+程序白名单能够降低误操作，但不是操作系统安全沙箱。如果可能接收不可信提示词
+或由不可信模型操作，应同时使用低权限 SSH 账户、远端文件权限、容器或服务级隔离。
+
+本项目不会自动：
+
+- 把用户批准变成绕过本机 Roots、凭据保护或主机身份检查的万能开关；
+- 在故障后重放普通命令、文件写入、上传或训练启动；
+- 一条路线失败后自动切换路线；
+- 读取有效命名 Roots 以外的本机文件；
+- 接受未知 SSH 主机密钥或扫描未声明网段。
 
 ## 本机根目录与文件传输
 
@@ -300,6 +333,29 @@ npm 包使用 `files` 白名单。发布前必须检查实际打包清单：
 npm pack --dry-run --json
 ```
 
+### MCP Client Roots 模式
+
+`--client-roots fallback` 是默认模式：启动参数或环境变量已配置 Roots 时优先使用，
+只有没有显式配置时才查询 MCP 客户端。`merge` 会把客户端提供的 `file://` Roots
+加入显式 Roots；`disabled` 完全忽略客户端 Roots。非文件 URI 会被忽略，最终有效
+目录始终可通过 `list_local_roots` 检查，传输路径仍必须是某个命名 Root 下的相对路径。
+
+## 审计日志
+
+`--audit-log` 或每台 Fleet 服务器的 `auditLog` 会记录脱敏 JSONL 事件。记录包含
+工具、时间、允许/拒绝状态、参数元数据和哈希，但不包含 stdout、stderr、stdin、
+脚本正文、文件内容、密码或密码哈希。辅助审计写入失败会报警，但不会阻断主要 SSH
+操作。策略拒绝、工具组禁用和传输能力不支持会被记录为未允许。
+
+## Windows 持久连接说明
+
+连接池通过 SSH 标准输入发送短 Python 执行器源码，并按 UTF-8 精确字节数读取，
+避免把完整守护程序塞进 Windows SSH 的长命令行。远端 Python 使用 `-X utf8`。
+注册表版本 2 应把 `remotePython` 放在具体路线中；Windows 主机应使用实际路径检查
+目录，不要盲信继承的 `USERPROFILE` 或 `COMPUTERNAME`。修改 MCP JavaScript 后必须
+重启 MCP，单纯关闭 SSH 池不会加载新代码。这个机制不会让 Linux 专属的 tmux、
+`df` 或 `systemctl` 在 Windows 上自动可用。
+
 ## 开发者代码检查流程
 
 项目级 [AGENTS.md](AGENTS.md) 要求 Codex 使用固定流程。
@@ -321,6 +377,14 @@ npm run inspect -- search --query staging/query.json
 
 ```powershell
 npm run verify
+```
+
+对不允许改动远端内容的生产服务器，使用完全只读的 smoke 测试。它检查输出
+Schema、身份、路径元数据和可选的只读 profile 命令，不会调用任何远端写入或
+删除工具：
+
+```powershell
+npm run smoke:readonly -- --fleet-config .\config\fleet.json --server readonly_host
 ```
 
 它按固定顺序执行：

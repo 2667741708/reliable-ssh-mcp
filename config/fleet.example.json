@@ -143,6 +143,8 @@
       "description": "Show concise Git status in a configured repository path.",
       "program": "git",
       "args": [
+        "--no-pager",
+        "--no-optional-locks",
         "status",
         "--short",
         "--branch"
